@@ -265,7 +265,10 @@ class Application:
                 language = None
             result = self.stt_engine.transcribe(audio_data, language)
             if result.text:
-                logger.info(f"Streaming chunk [{result.language}]: {result.text}")
+                logger.info(
+                    f"Streaming chunk [{result.language}] "
+                    f"({result.processing_time_seconds:.2f}s): {result.text}"
+                )
                 if target_hwnd:
                     force_foreground_window(target_hwnd)
                     time.sleep(0.2)
