@@ -447,6 +447,16 @@ class Application:
         # Apply autostart
         AppSettings.set_autostart(new_settings.auto_start_with_windows)
 
+        # Update floating window visibility and always-on-top
+        if self.floating_window and self.floating_window._root:
+            self.floating_window._root.wm_attributes(
+                "-topmost", new_settings.always_on_top
+            )
+            if not new_settings.show_floating_window:
+                self.floating_window._root.after(
+                    0, self.floating_window._root.withdraw
+                )
+
         logger.info("Settings applied")
 
     def _open_history(self):
