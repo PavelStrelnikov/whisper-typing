@@ -10,6 +10,7 @@ Output: dist/WhisperTyping/WhisperTyping.exe
 """
 import os
 import sys
+import glob
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
@@ -19,6 +20,18 @@ ctk_datas = collect_data_files("customtkinter")
 
 # Collect faster-whisper data
 fw_datas = collect_data_files("faster_whisper", include_py_files=False)
+
+# Collect CUDA runtime DLLs from nvidia pip packages (cublas, cudnn)
+# These are needed for GPU (CUDA) mode with faster-whisper / ctranslate2.
+def _nvidia_binaries():
+    import site
+    result = []
+    for sp in site.getsitepackages():
+        for dll in glob.glob(os.path.join(sp, "nvidia", "**", "*.dll"), recursive=True):
+            result.append((dll, "."))
+    return result
+
+nvidia_binaries = _nvidia_binaries()
 
 # Hidden imports that PyInstaller might miss
 hidden_imports = [
@@ -48,7 +61,7 @@ hidden_imports += collect_submodules("customtkinter")
 a = Analysis(
     ["main.py"],
     pathex=[],
-    binaries=[],
+    binaries=nvidia_binaries,
     datas=ctk_datas + fw_datas + [
         (".env.example", "."),
         ("assets/icon.ico", "assets"),
