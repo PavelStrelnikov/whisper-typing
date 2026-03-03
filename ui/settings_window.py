@@ -1,7 +1,10 @@
 import customtkinter as ctk
 import keyboard
 import logging
+import os
 from typing import Optional, Callable
+
+_ICON_PATH = os.path.join(os.path.dirname(__file__), "..", "assets", "icon.ico")
 
 from config.settings import AppSettings, STTProvider, ComputeType
 from config.constants import (
@@ -68,6 +71,8 @@ class SettingsWindow:
         self._window.resizable(False, True)
         self._window.configure(fg_color=CARD_BG)
         self._window.grab_set()
+        if os.path.exists(_ICON_PATH):
+            self._window.after(100, lambda: self._window.iconbitmap(_ICON_PATH))
 
         # Header
         header = ctk.CTkFrame(self._window, fg_color=CARD_BG)

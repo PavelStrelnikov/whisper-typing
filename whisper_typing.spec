@@ -51,6 +51,7 @@ a = Analysis(
     binaries=[],
     datas=ctk_datas + fw_datas + [
         (".env.example", "."),
+        ("assets/icon.ico", "assets"),
     ],
     hiddenimports=hidden_imports,
     hookspath=[],
@@ -84,7 +85,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # icon="assets/icon.ico",  # Uncomment when icon exists
+    icon="assets/icon.ico",
 )
 
 coll = COLLECT(

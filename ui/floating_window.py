@@ -1,8 +1,11 @@
 import ctypes
 import customtkinter as ctk
 import logging
+import os
 from enum import Enum
 from typing import Optional, Callable
+
+_ICON_PATH = os.path.join(os.path.dirname(__file__), "..", "assets", "icon.ico")
 
 # Win32: Make window non-focusable (WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
 GWL_EXSTYLE = -20
@@ -62,6 +65,8 @@ class FloatingWindow:
         self._root.overrideredirect(True)
         self._root.wm_attributes("-topmost", self.always_on_top)
         self._root.wm_attributes("-alpha", self.opacity)
+        if os.path.exists(_ICON_PATH):
+            self._root.iconbitmap(_ICON_PATH)
 
         # Make the window non-focusable so it doesn't steal focus from target apps
         self._root.update_idletasks()
