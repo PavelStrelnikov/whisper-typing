@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.env
+*.egg
+.venv/
+.venv312/
+venv/
+*.spec.bak
+*.manifest
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

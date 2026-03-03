@@ -1,0 +1,9 @@
+# Install base dependencies first:
+#   pip install -r requirements.txt
+#
+# Then install CUDA support:
+#   pip install -r requirements-cuda.txt
+#
+# Requires NVIDIA GPU with CUDA 12 support
+nvidia-cublas-cu12
+nvidia-cudnn-cu12>=9.0,<10.0
