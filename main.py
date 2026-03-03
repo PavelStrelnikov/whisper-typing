@@ -1,11 +1,22 @@
 import sys
 import os
 import logging
+import ctypes
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
 # Add project root to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+
+def _set_app_id():
+    """Tell Windows this is WhisperTyping (not pythonw.exe) for taskbar grouping."""
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "WhisperTyping.App.1"
+        )
+    except Exception:
+        pass
 
 
 def setup_logging():
@@ -37,6 +48,7 @@ def setup_logging():
 
 
 def main():
+    _set_app_id()
     setup_logging()
     logger = logging.getLogger(__name__)
 

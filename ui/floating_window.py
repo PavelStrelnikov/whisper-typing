@@ -1,21 +1,27 @@
 import ctypes
+import ctypes.wintypes as wintypes
 import customtkinter as ctk
 import logging
-import os
 from enum import Enum
 from typing import Optional, Callable
 
-_ICON_PATH = os.path.join(os.path.dirname(__file__), "..", "assets", "icon.ico")
+from config.resources import ICON_PATH
 
 # Win32: Make window non-focusable (WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
 GWL_EXSTYLE = -20
 WS_EX_NOACTIVATE = 0x08000000
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_TOPMOST = 0x00000008
+WM_SETICON = 0x0080
+IMAGE_ICON = 1
+LR_LOADFROMFILE = 0x0010
+LR_DEFAULTSIZE = 0x0040
 
 _user32 = ctypes.windll.user32
 _user32.GetWindowLongW.restype = ctypes.c_long
 _user32.SetWindowLongW.restype = ctypes.c_long
+_user32.LoadImageW.restype = wintypes.HANDLE
+_user32.SendMessageW.restype = ctypes.c_long
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +71,8 @@ class FloatingWindow:
         self._root.overrideredirect(True)
         self._root.wm_attributes("-topmost", self.always_on_top)
         self._root.wm_attributes("-alpha", self.opacity)
-        if os.path.exists(_ICON_PATH):
-            self._root.iconbitmap(_ICON_PATH)
+        self._root.update_idletasks()
+        self._apply_icon()
 
         # Make the window non-focusable so it doesn't steal focus from target apps
         self._root.update_idletasks()
@@ -145,6 +151,27 @@ class FloatingWindow:
             command=self._toggle_pin,
         )
         self._pin_btn.pack(side="right", padx=(4, 0))
+
+    def _apply_icon(self):
+        """Set the window icon via Win32 WM_SETICON (works with overrideredirect)."""
+        import os
+        if not os.path.exists(ICON_PATH):
+            return
+        try:
+            hicon = _user32.LoadImageW(
+                None, ICON_PATH, IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE
+            )
+            if not hicon:
+                return
+            hwnd = ctypes.windll.user32.GetParent(self._root.winfo_id())
+            if not hwnd:
+                hwnd = self._root.winfo_id()
+            _user32.SendMessageW(hwnd, WM_SETICON, 0, hicon)  # ICON_SMALL
+            _user32.SendMessageW(hwnd, WM_SETICON, 1, hicon)  # ICON_BIG
+            # Also set via tkinter for Alt+Tab / settings child windows
+            self._root.iconbitmap(ICON_PATH)
+        except Exception as e:
+            logger.debug(f"Icon set failed: {e}")
 
     def _start_drag(self, event):
         self._drag_data["x"] = event.x
