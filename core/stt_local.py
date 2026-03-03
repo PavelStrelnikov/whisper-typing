@@ -109,6 +109,15 @@ class LocalSTTEngine(STTEngine):
             processing_time_seconds=processing_time,
         )
 
+    def unload(self):
+        """Explicitly unload the model to free VRAM/RAM before switching device."""
+        if self._model is not None:
+            del self._model
+            self._model = None
+            import gc
+            gc.collect()
+            logger.info(f"Model unloaded from {self.device}")
+
     def is_available(self) -> bool:
         try:
             self._ensure_model_loaded()

@@ -169,16 +169,33 @@ class Application:
         )
 
     def _init_stt_engine(self):
+        # Unload old model first to free VRAM/RAM before loading new one
+        if self.stt_engine is not None and hasattr(self.stt_engine, "unload"):
+            self.stt_engine.unload()
+
         if self.settings.stt_provider == STTProvider.LOCAL.value:
+            compute_type = self.settings.compute_type
+            # float16 is CUDA-only — fall back to int8 on CPU
+            if self.settings.device == "cpu" and compute_type == "float16":
+                compute_type = "int8"
+                logger.info("CPU mode: overriding compute_type float16 → int8")
             self.stt_engine = LocalSTTEngine(
                 model_size=self.settings.local_model_size,
                 device=self.settings.device,
-                compute_type=self.settings.compute_type,
+                compute_type=compute_type,
             )
         else:
             self.stt_engine = CloudSTTEngine(
                 api_key=self.settings.openai_api_key,
                 model=self.settings.openai_model,
+            )
+
+        # Update floating window device info label
+        if self.floating_window:
+            self.floating_window.set_device_info(
+                device=self.settings.device,
+                model=self.settings.local_model_size,
+                provider=self.settings.stt_provider,
             )
 
     def _init_normalizer(self):
@@ -206,6 +223,14 @@ class Application:
 
         # Create and run floating window (main thread, blocking)
         self.floating_window.create()
+
+        # Show current device/model in the floating window
+        self.floating_window.set_device_info(
+            device=self.settings.device,
+            model=self.settings.local_model_size,
+            provider=self.settings.stt_provider,
+        )
+
         logger.info("WhisperTyping started. Waiting for input trigger...")
 
         # If not preloading a model, auto-hide the window after a few seconds
@@ -399,12 +424,16 @@ class Application:
         logger.info("Applying new settings...")
         old_provider = self.settings.stt_provider
         old_model = self.settings.local_model_size
+        old_device = self.settings.device
+        old_compute_type = self.settings.compute_type
         self.settings = new_settings
 
-        # Rebuild STT engine if provider or model changed
+        # Rebuild STT engine if provider, model, device, or compute type changed
         if (
             new_settings.stt_provider != old_provider
             or new_settings.local_model_size != old_model
+            or new_settings.device != old_device
+            or new_settings.compute_type != old_compute_type
         ):
             self._init_stt_engine()
             if new_settings.stt_provider == STTProvider.LOCAL.value:
@@ -449,6 +478,14 @@ class Application:
 
         # Apply autostart
         AppSettings.set_autostart(new_settings.auto_start_with_windows)
+
+        # Always refresh device/model label (even if engine wasn't rebuilt)
+        if self.floating_window:
+            self.floating_window.set_device_info(
+                device=new_settings.device,
+                model=new_settings.local_model_size,
+                provider=new_settings.stt_provider,
+            )
 
         # Update floating window visibility and always-on-top
         if self.floating_window and self.floating_window._root:

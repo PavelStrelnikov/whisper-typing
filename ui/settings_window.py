@@ -1,10 +1,10 @@
+import tkinter as tk
 import customtkinter as ctk
 import keyboard
 import logging
 from typing import Optional, Callable
 
 from config.resources import ICON_PATH
-
 from config.settings import AppSettings, STTProvider, ComputeType
 from config.constants import (
     SUPPORTED_LANGUAGES,
@@ -17,46 +17,97 @@ from core.audio_recorder import AudioRecorder
 
 logger = logging.getLogger(__name__)
 
-# Colors
-CARD_BG = "#1e1e2e"
-SECTION_BG = "#272740"
-ACCENT = "#6c5ce7"
-ACCENT_HOVER = "#5a4bd1"
-DANGER = "#e74c3c"
+# ── Color tokens ──────────────────────────────────────────────────────────────
+CARD_BG      = "#13131f"   # main window background
+SECTION_BG   = "#1d1d30"   # card background
+INPUT_BG     = "#0f0f1c"   # entry / option-menu background
+ACCENT       = "#7c6af0"   # primary violet
+ACCENT_HOVER = "#6a58dc"
+DANGER       = "#e74c3c"
 DANGER_HOVER = "#c0392b"
-TEXT_DIM = "#888899"
-TEXT_BRIGHT = "#e0e0e0"
-BORDER = "#3a3a5c"
+TEXT_DIM     = "#8080a0"
+TEXT_BRIGHT  = "#e0e0f0"
+BORDER       = "#2a2a46"
+TIP_BG       = "#1d1d30"   # tooltip popup background
+
+
+class _Tooltip:
+    """Hover tooltip for any CTK/tkinter widget. Appears after 700 ms."""
+
+    def __init__(self, widget, text: str):
+        self._w    = widget
+        self._text = text
+        self._win  = None
+        self._job  = None
+        try:
+            widget.bind("<Enter>",       self._schedule, add="+")
+            widget.bind("<Leave>",       self._cancel,   add="+")
+            widget.bind("<ButtonPress>", self._cancel,   add="+")
+        except (NotImplementedError, AttributeError):
+            # CTkSegmentedButton and some composite widgets don't support bind.
+            # Fall back to the underlying tkinter widget if available.
+            inner = getattr(widget, "_canvas", None) or getattr(widget, "_label", None)
+            if inner:
+                inner.bind("<Enter>",       self._schedule, add="+")
+                inner.bind("<Leave>",       self._cancel,   add="+")
+                inner.bind("<ButtonPress>", self._cancel,   add="+")
+
+    def _schedule(self, _=None):
+        self._job = self._w.after(700, self._show)
+
+    def _cancel(self, _=None):
+        if self._job:
+            self._w.after_cancel(self._job)
+            self._job = None
+        if self._win:
+            self._win.destroy()
+            self._win = None
+
+    def _show(self):
+        self._job = None
+        if self._win:
+            return
+        x = self._w.winfo_rootx()
+        y = self._w.winfo_rooty() + self._w.winfo_height() + 6
+        tw = tk.Toplevel(self._w)
+        tw.wm_overrideredirect(True)
+        tw.wm_attributes("-topmost", True)
+        tw.configure(bg=BORDER)
+        frame = tk.Frame(tw, bg=TIP_BG, padx=10, pady=8)
+        frame.pack(padx=1, pady=1)
+        tk.Label(
+            frame,
+            text=self._text,
+            bg=TIP_BG, fg=TEXT_BRIGHT,
+            font=("Segoe UI", 10),
+            wraplength=300,
+            justify="left",
+        ).pack()
+        tw.update_idletasks()
+        # Keep tooltip on screen horizontally
+        sw   = tw.winfo_screenwidth()
+        tw_w = tw.winfo_reqwidth()
+        if x + tw_w > sw - 12:
+            x = sw - tw_w - 12
+        tw.wm_geometry(f"+{x}+{y}")
+        self._win = tw
 
 
 def _make_card(parent, **kwargs):
-    """Create a styled card frame."""
-    return ctk.CTkFrame(
-        parent,
-        corner_radius=12,
-        fg_color=SECTION_BG,
-        border_width=1,
-        border_color=BORDER,
-        **kwargs,
-    )
+    return ctk.CTkFrame(parent, corner_radius=12, fg_color=SECTION_BG,
+                        border_width=1, border_color=BORDER, **kwargs)
 
 
 class SettingsWindow:
-    """Modern tabbed settings dialog window."""
+    """Tabbed settings dialog with hover tooltips."""
 
-    def __init__(
-        self,
-        parent: ctk.CTk,
-        settings: AppSettings,
-        on_save: Optional[Callable[[AppSettings], None]] = None,
-    ):
-        self.settings = settings
-        self.on_save = on_save
+    def __init__(self, parent: ctk.CTk, settings: AppSettings,
+                 on_save: Optional[Callable[[AppSettings], None]] = None):
+        self.settings  = settings
+        self.on_save   = on_save
         self._window: Optional[ctk.CTkToplevel] = None
-        self._parent = parent
-
-        # Hotkey recording state
-        self._hotkey_recording = False
+        self._parent   = parent
+        self._hotkey_recording      = False
         self._norm_hotkey_recording = False
 
     def show(self):
@@ -66,7 +117,7 @@ class SettingsWindow:
 
         self._window = ctk.CTkToplevel(self._parent)
         self._window.title("WhisperTyping — Settings")
-        self._window.geometry("520x680")
+        self._window.geometry("530x540")
         self._window.resizable(False, True)
         self._window.configure(fg_color=CARD_BG)
         self._window.grab_set()
@@ -74,16 +125,24 @@ class SettingsWindow:
         if os.path.exists(ICON_PATH):
             self._window.after(100, lambda: self._window.iconbitmap(ICON_PATH))
 
-        # Header
+        # ── Header ────────────────────────────────
         header = ctk.CTkFrame(self._window, fg_color=CARD_BG)
-        header.pack(fill="x", padx=20, pady=(16, 6))
+        header.pack(fill="x", padx=24, pady=(20, 0))
+        title_row = ctk.CTkFrame(header, fg_color="transparent")
+        title_row.pack(fill="x")
         ctk.CTkLabel(
-            header, text="Settings",
-            font=ctk.CTkFont(family="Segoe UI", size=22, weight="bold"),
+            title_row, text="Settings",
+            font=ctk.CTkFont(family="Segoe UI", size=24, weight="bold"),
             text_color=TEXT_BRIGHT,
         ).pack(side="left")
+        ctk.CTkLabel(
+            title_row, text="WhisperTyping",
+            font=ctk.CTkFont(family="Segoe UI", size=13),
+            text_color=TEXT_DIM,
+        ).pack(side="left", padx=(12, 0), pady=(6, 0))
+        ctk.CTkFrame(self._window, height=1, fg_color=BORDER).pack(fill="x", padx=14, pady=(12, 2))
 
-        # Tab view
+        # ── Tab view ──────────────────────────────
         tabview = ctk.CTkTabview(
             self._window,
             fg_color=CARD_BG,
@@ -91,39 +150,33 @@ class SettingsWindow:
             segmented_button_selected_color=ACCENT,
             segmented_button_selected_hover_color=ACCENT_HOVER,
             segmented_button_unselected_color=SECTION_BG,
-            segmented_button_unselected_hover_color=BORDER,
-            border_width=1,
-            border_color=BORDER,
+            segmented_button_unselected_hover_color="#252548",
+            border_width=0,
         )
-        tabview.pack(fill="both", expand=True, padx=14, pady=(0, 0))
-
-        for tab_name in ("Recognition", "Hotkeys", "Output", "App"):
-            tabview.add(tab_name)
+        tabview.pack(fill="both", expand=True, padx=14)
+        for name in ("Recognition", "Hotkeys", "Output", "App"):
+            tabview.add(name)
 
         self._build_recognition_tab(tabview.tab("Recognition"))
         self._build_hotkeys_tab(tabview.tab("Hotkeys"))
         self._build_output_tab(tabview.tab("Output"))
         self._build_app_tab(tabview.tab("App"))
 
-        # Action buttons
+        # ── Buttons ───────────────────────────────
+        ctk.CTkFrame(self._window, height=1, fg_color=BORDER).pack(fill="x", padx=14)
         btn_frame = ctk.CTkFrame(self._window, fg_color=CARD_BG)
-        btn_frame.pack(fill="x", padx=20, pady=(6, 16))
-
+        btn_frame.pack(fill="x", padx=20, pady=(10, 16))
         ctk.CTkButton(
             btn_frame, text="Save", command=self._save,
             width=110, height=36,
             font=ctk.CTkFont(size=14, weight="bold"),
-            fg_color=ACCENT, hover_color=ACCENT_HOVER,
-            corner_radius=10,
+            fg_color=ACCENT, hover_color=ACCENT_HOVER, corner_radius=10,
         ).pack(side="right", padx=(8, 0))
-
         ctk.CTkButton(
             btn_frame, text="Cancel", command=self._cancel,
-            width=110, height=36,
-            font=ctk.CTkFont(size=14),
+            width=110, height=36, font=ctk.CTkFont(size=14),
             fg_color="transparent", hover_color=SECTION_BG,
-            border_width=1, border_color=BORDER,
-            corner_radius=10,
+            border_width=1, border_color=BORDER, corner_radius=10,
         ).pack(side="right")
 
     # ── Tab builders ──────────────────────────────────────────────────────────
@@ -131,102 +184,113 @@ class SettingsWindow:
     def _build_recognition_tab(self, tab):
         scroll = self._tab_scroll(tab)
 
-        # ── STT Provider ────────────────────────
+        # STT Provider card
         card = _make_card(scroll)
         card.pack(fill="x", pady=6, padx=4)
         self._section_label(card, "Speech Recognition")
 
         self._provider_var = ctk.StringVar(value=self.settings.stt_provider)
-        ctk.CTkSegmentedButton(
+        seg = ctk.CTkSegmentedButton(
             card, values=["local", "cloud"],
             variable=self._provider_var,
             command=lambda _: self._on_provider_change(),
             font=ctk.CTkFont(size=13),
-            selected_color=ACCENT,
-            selected_hover_color=ACCENT_HOVER,
-        ).pack(fill="x", padx=14, pady=(0, 4))
-        self._desc(card, "Local = private, free, needs GPU/CPU. Cloud = OpenAI API, works on any computer.")
+            selected_color=ACCENT, selected_hover_color=ACCENT_HOVER,
+        )
+        seg.pack(fill="x", padx=14, pady=(0, 12))
+        _Tooltip(seg,
+            "Local — private, free, runs on your PC (GPU recommended).\n"
+            "Cloud — sends audio to OpenAI, works on any PC but costs money per minute.")
 
-        # Local sub-card
+        # Local sub-frame
         self._local_frame = ctk.CTkFrame(card, fg_color="transparent")
 
         row = self._row(self._local_frame)
-        ctk.CTkLabel(row, text="Model", text_color=TEXT_DIM, width=90, anchor="w").pack(side="left")
+        lbl = self._lbl(row, "Model")
+        _Tooltip(lbl,
+            "tiny/base: fast but unreliable — may output wrong language.\n"
+            "small: decent balance.\n"
+            "large-v3: best accuracy, needs ~6 GB VRAM (GPU) or ~8 GB RAM (CPU).\n"
+            "Recommended: large-v3 on CUDA.")
         self._model_size_var = ctk.StringVar(value=self.settings.local_model_size)
         ctk.CTkOptionMenu(
             row, variable=self._model_size_var, values=LOCAL_MODEL_SIZES,
-            fg_color=CARD_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER,
+            fg_color=INPUT_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER,
             width=200,
         ).pack(side="right")
-        self._desc(self._local_frame, "Larger model = better accuracy, slower startup. large-v3 recommended for production.", padx=14)
 
         row = self._row(self._local_frame)
-        ctk.CTkLabel(row, text="Device", text_color=TEXT_DIM, width=90, anchor="w").pack(side="left")
+        lbl = self._lbl(row, "Device")
+        _Tooltip(lbl,
+            "cuda (NVIDIA GPU): ~0.5s per phrase — fastest.\n"
+            "cpu: works on any PC — tiny/small are ok, large-v3 on CPU takes 10–30s.\n"
+            "Switching device reloads the model automatically.")
         self._device_var = ctk.StringVar(value=self.settings.device)
         ctk.CTkOptionMenu(
             row, variable=self._device_var, values=["cuda", "cpu"],
-            fg_color=CARD_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER,
-            width=200,
+            fg_color=INPUT_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER,
+            width=200, command=lambda _: self._on_device_change(),
         ).pack(side="right")
-        self._desc(self._local_frame, "Select cuda if you have an NVIDIA GPU for much faster transcription.", padx=14)
 
-        row = self._row(self._local_frame, pady=(3, 6))
-        ctk.CTkLabel(row, text="Precision", text_color=TEXT_DIM, width=90, anchor="w").pack(side="left")
+        row = self._row(self._local_frame, pady=(3, 10))
+        lbl = self._lbl(row, "Precision")
+        _Tooltip(lbl,
+            "float16: GPU only, best speed and accuracy.\n"
+            "int8: CPU/GPU, lower memory, slightly less accurate.\n"
+            "int8_float16: mixed mode for GPU.\n"
+            "Auto-adjusts when you switch device.")
         self._compute_var = ctk.StringVar(value=self.settings.compute_type)
-        ctk.CTkOptionMenu(
-            row, variable=self._compute_var,
-            values=[ct.value for ct in ComputeType],
-            fg_color=CARD_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER,
-            width=200,
-        ).pack(side="right")
-        self._desc(self._local_frame, "float16 for GPU. int8/int8_float16 = faster, slightly less accurate.", padx=14)
+        self._compute_menu = ctk.CTkOptionMenu(
+            row, variable=self._compute_var, values=[ct.value for ct in ComputeType],
+            fg_color=INPUT_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER, width=200)
+        self._compute_menu.pack(side="right")
 
-        # Cloud sub-card
+        # Cloud sub-frame
         self._cloud_frame = ctk.CTkFrame(card, fg_color="transparent")
 
         row = self._row(self._cloud_frame)
-        ctk.CTkLabel(row, text="API Key", text_color=TEXT_DIM, width=90, anchor="w").pack(side="left")
+        lbl = self._lbl(row, "API Key")
+        _Tooltip(lbl, "Your OpenAI API key (sk-…). Required for cloud transcription.")
         self._api_key_var = ctk.StringVar(value=self.settings.openai_api_key)
-        ctk.CTkEntry(
-            row, textvariable=self._api_key_var, show="*",
-            fg_color=CARD_BG, border_color=BORDER, width=200,
-        ).pack(side="right")
-        self._desc(self._cloud_frame, "Your OpenAI API key (sk-…). Required for cloud transcription.", padx=14)
+        ctk.CTkEntry(row, textvariable=self._api_key_var, show="*",
+                     fg_color=INPUT_BG, border_color=BORDER, width=200).pack(side="right")
 
-        row = self._row(self._cloud_frame, pady=(3, 6))
-        ctk.CTkLabel(row, text="Model", text_color=TEXT_DIM, width=90, anchor="w").pack(side="left")
+        row = self._row(self._cloud_frame, pady=(3, 10))
+        lbl = self._lbl(row, "Model")
+        _Tooltip(lbl, "Cloud STT model. Currently only whisper-1 is available.")
         self._cloud_model_var = ctk.StringVar(value=self.settings.openai_model)
         ctk.CTkOptionMenu(
             row, variable=self._cloud_model_var, values=["whisper-1"],
-            fg_color=CARD_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER,
-            width=200,
+            fg_color=INPUT_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER, width=200,
         ).pack(side="right")
 
         self._on_provider_change()
 
-        # ── Language ─────────────────────────────
+        # Language card
         card = _make_card(scroll)
         card.pack(fill="x", pady=6, padx=4)
-        self._section_label(card, "Language")
+        self._section_label(card, "Language",
+            tip="⚠ With tiny/base models, always set language explicitly —\n"
+                "auto-detect is unreliable and may output the wrong language.\n"
+                "With large-v3, auto works well.")
 
-        row = ctk.CTkFrame(card, fg_color="transparent")
-        row.pack(fill="x", padx=14, pady=(0, 4))
+        lang_row = ctk.CTkFrame(card, fg_color="transparent")
+        lang_row.pack(fill="x", padx=14, pady=(0, 12))
         self._lang_var = ctk.StringVar(value=self.settings.language)
         for code, display in SUPPORTED_LANGUAGES.items():
             ctk.CTkRadioButton(
-                row, text=display, variable=self._lang_var, value=code,
-                font=ctk.CTkFont(size=13),
-                fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                lang_row, text=display, variable=self._lang_var, value=code,
+                font=ctk.CTkFont(size=13), fg_color=ACCENT, hover_color=ACCENT_HOVER,
             ).pack(side="left", padx=(0, 14))
-        self._desc(card, "Auto-detect works well for most cases. Set explicitly if you record one language only.")
 
-        # ── Microphone ───────────────────────────
+        # Microphone card
         card = _make_card(scroll)
         card.pack(fill="x", pady=6, padx=4)
-        self._section_label(card, "Microphone")
+        self._section_label(card, "Microphone",
+            tip="Audio input device used for recording.\nSystem Default works for most setups.")
 
-        devices = AudioRecorder.list_devices()
-        device_names = ["System Default"] + [d["name"] for d in devices]
+        devices       = AudioRecorder.list_devices()
+        device_names  = ["System Default"] + [d["name"] for d in devices]
         device_indices = [-1] + [d["index"] for d in devices]
         self._device_map = dict(zip(device_names, device_indices))
 
@@ -239,19 +303,17 @@ class SettingsWindow:
         self._mic_var = ctk.StringVar(value=current_device)
         ctk.CTkOptionMenu(
             card, variable=self._mic_var, values=device_names,
-            fg_color=CARD_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER,
-        ).pack(fill="x", padx=14, pady=(0, 4))
-        self._desc(card, "Audio input device. System Default works for most setups.")
+            fg_color=INPUT_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER,
+        ).pack(fill="x", padx=14, pady=(0, 12))
 
     def _build_hotkeys_tab(self, tab):
         scroll = self._tab_scroll(tab)
 
-        # ── Main Trigger ─────────────────────────
+        # Main Trigger card
         card = _make_card(scroll)
         card.pack(fill="x", pady=6, padx=4)
-        self._section_label(card, "Main Trigger")
-
-        self._desc(card, "Keyboard combo or mouse button that starts/stops recording.")
+        self._section_label(card, "Main Trigger",
+            tip="Keyboard combo or mouse button that starts/stops recording.")
 
         self._trigger_type_var = ctk.StringVar(value=self.settings.trigger_type)
         ctk.CTkSegmentedButton(
@@ -259,58 +321,49 @@ class SettingsWindow:
             variable=self._trigger_type_var,
             command=lambda _: self._on_trigger_type_change(),
             font=ctk.CTkFont(size=13),
-            selected_color=ACCENT,
-            selected_hover_color=ACCENT_HOVER,
-        ).pack(fill="x", padx=14, pady=(4, 8))
+            selected_color=ACCENT, selected_hover_color=ACCENT_HOVER,
+        ).pack(fill="x", padx=14, pady=(0, 8))
 
-        # Keyboard trigger frame
         self._kb_frame = ctk.CTkFrame(card, fg_color="transparent")
         self._hotkey_var = ctk.StringVar(value=self.settings.trigger_key)
         self._hotkey_display, self._hotkey_btn = self._make_hotkey_recorder(
-            self._kb_frame, self._hotkey_var,
-            start_fn=self._start_hotkey_recording,
-        )
+            self._kb_frame, self._hotkey_var, start_fn=self._start_hotkey_recording)
 
-        # Mouse trigger frame
         self._mouse_frame = ctk.CTkFrame(card, fg_color="transparent")
-        row = self._row(self._mouse_frame, pady=(3, 6))
-        ctk.CTkLabel(row, text="Button", text_color=TEXT_DIM, width=60, anchor="w").pack(side="left")
+        row = self._row(self._mouse_frame, pady=(3, 8))
+        self._lbl(row, "Button", width=60)
         self._mouse_btn_var = ctk.StringVar(value=self.settings.trigger_mouse_button)
         ctk.CTkOptionMenu(
-            row, variable=self._mouse_btn_var,
-            values=list(MOUSE_BUTTONS.keys()),
-            fg_color=CARD_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER,
-            width=200,
+            row, variable=self._mouse_btn_var, values=list(MOUSE_BUTTONS.keys()),
+            fg_color=INPUT_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER, width=200,
         ).pack(side="right")
 
         self._on_trigger_type_change()
 
-        # Mode
-        row = self._row(card, pady=(4, 10))
-        ctk.CTkLabel(row, text="Mode", text_color=TEXT_DIM, width=60, anchor="w").pack(side="left")
+        row = self._row(card, pady=(4, 12))
+        lbl = self._lbl(row, "Mode", width=60)
+        _Tooltip(lbl,
+            "Push-to-talk: hold key while speaking, release to transcribe.\n"
+            "Toggle: press once to start recording, press again to stop.")
         self._mode_var = ctk.StringVar(value=self.settings.trigger_mode)
         ctk.CTkSegmentedButton(
             row, values=["push_to_talk", "toggle"],
             variable=self._mode_var,
             font=ctk.CTkFont(size=12),
-            selected_color=ACCENT,
-            selected_hover_color=ACCENT_HOVER,
+            selected_color=ACCENT, selected_hover_color=ACCENT_HOVER,
         ).pack(side="right")
-        self._desc(card, "Push-to-talk: hold key while speaking. Toggle: press once to start, again to stop.")
 
-        # ── Normalize Trigger ────────────────────
+        # Normalize Trigger card
         card = _make_card(scroll)
         card.pack(fill="x", pady=6, padx=4)
-        self._section_label(card, "Normalize Trigger")
+        self._section_label(card, "Normalize Trigger",
+            tip="Second hotkey that transcribes AND runs AI text cleanup in one step.")
 
         self._norm_enabled_var = ctk.BooleanVar(value=self.settings.normalize_trigger_enabled)
-        ctk.CTkCheckBox(
-            card, text="Enable normalize trigger",
-            variable=self._norm_enabled_var,
-            font=ctk.CTkFont(size=13),
-            fg_color=ACCENT, hover_color=ACCENT_HOVER,
-        ).pack(anchor="w", padx=14, pady=(0, 4))
-        self._desc(card, "Second hotkey that transcribes AND runs AI cleanup on the text in one step.")
+        cb = ctk.CTkCheckBox(card, text="Enable normalize trigger",
+                             variable=self._norm_enabled_var,
+                             font=ctk.CTkFont(size=13), fg_color=ACCENT, hover_color=ACCENT_HOVER)
+        cb.pack(anchor="w", padx=14, pady=(0, 8))
 
         self._norm_trigger_type_var = ctk.StringVar(value=self.settings.normalize_trigger_type)
         ctk.CTkSegmentedButton(
@@ -318,89 +371,77 @@ class SettingsWindow:
             variable=self._norm_trigger_type_var,
             command=lambda _: self._on_norm_trigger_type_change(),
             font=ctk.CTkFont(size=12),
-            selected_color=ACCENT,
-            selected_hover_color=ACCENT_HOVER,
-        ).pack(fill="x", padx=14, pady=(4, 8))
+            selected_color=ACCENT, selected_hover_color=ACCENT_HOVER,
+        ).pack(fill="x", padx=14, pady=(0, 8))
 
-        # Normalize keyboard frame
         self._norm_kb_frame = ctk.CTkFrame(card, fg_color="transparent")
         self._norm_hotkey_var = ctk.StringVar(value=self.settings.normalize_trigger_key)
         self._norm_hotkey_display, self._norm_hotkey_btn = self._make_hotkey_recorder(
-            self._norm_kb_frame, self._norm_hotkey_var,
-            start_fn=self._start_norm_hotkey_recording,
-        )
+            self._norm_kb_frame, self._norm_hotkey_var, start_fn=self._start_norm_hotkey_recording)
 
-        # Normalize mouse frame
         self._norm_mouse_frame = ctk.CTkFrame(card, fg_color="transparent")
-        row = self._row(self._norm_mouse_frame, pady=(3, 6))
-        ctk.CTkLabel(row, text="Button", text_color=TEXT_DIM, width=60, anchor="w").pack(side="left")
+        row = self._row(self._norm_mouse_frame, pady=(3, 8))
+        self._lbl(row, "Button", width=60)
         self._norm_mouse_btn_var = ctk.StringVar(value=self.settings.normalize_trigger_mouse_button)
         ctk.CTkOptionMenu(
-            row, variable=self._norm_mouse_btn_var,
-            values=list(MOUSE_BUTTONS.keys()),
-            fg_color=CARD_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER,
-            width=200,
+            row, variable=self._norm_mouse_btn_var, values=list(MOUSE_BUTTONS.keys()),
+            fg_color=INPUT_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER, width=200,
         ).pack(side="right")
 
         self._on_norm_trigger_type_change()
 
-        # Normalize mode
-        row = self._row(card, pady=(4, 10))
-        ctk.CTkLabel(row, text="Mode", text_color=TEXT_DIM, width=60, anchor="w").pack(side="left")
+        row = self._row(card, pady=(4, 12))
+        lbl = self._lbl(row, "Mode", width=60)
+        _Tooltip(lbl, "Push-to-talk: hold key while speaking. Toggle: press once to start, again to stop.")
         self._norm_mode_var = ctk.StringVar(value=self.settings.normalize_trigger_mode)
         ctk.CTkSegmentedButton(
             row, values=["push_to_talk", "toggle"],
             variable=self._norm_mode_var,
             font=ctk.CTkFont(size=12),
-            selected_color=ACCENT,
-            selected_hover_color=ACCENT_HOVER,
+            selected_color=ACCENT, selected_hover_color=ACCENT_HOVER,
         ).pack(side="right")
 
     def _build_output_tab(self, tab):
         scroll = self._tab_scroll(tab)
 
-        # ── Text Injection ───────────────────────
+        # Text Injection card
         card = _make_card(scroll)
         card.pack(fill="x", pady=6, padx=4)
         self._section_label(card, "Text Injection")
 
         row = self._row(card)
-        ctk.CTkLabel(row, text="Method", text_color=TEXT_DIM, width=90, anchor="w").pack(side="left")
+        lbl = self._lbl(row, "Method", width=90)
+        _Tooltip(lbl,
+            "Clipboard: most compatible, pastes full text after speaking.\n"
+            "SendInput: simulates keyboard — works where clipboard is blocked.\n"
+            "Streaming: types in real-time while you speak — needs fast GPU\n"
+            "or small model on CPU, otherwise may lag or overflow.")
         self._injection_var = ctk.StringVar(value=self.settings.injection_method)
         ctk.CTkOptionMenu(
             row, variable=self._injection_var,
             values=["clipboard", "sendinput", "streaming"],
-            fg_color=CARD_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER,
-            width=200,
+            fg_color=INPUT_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER, width=200,
         ).pack(side="right")
-        self._desc(card, "Clipboard: most compatible. SendInput: direct key simulation. Streaming: inserts text in real-time as you speak.")
 
         self._restore_clip_var = ctk.BooleanVar(value=self.settings.restore_clipboard)
-        ctk.CTkCheckBox(
-            card, text="Restore clipboard after paste",
-            variable=self._restore_clip_var,
-            font=ctk.CTkFont(size=13),
-            fg_color=ACCENT, hover_color=ACCENT_HOVER,
-        ).pack(anchor="w", padx=14, pady=(8, 2))
-        self._desc(card, "Restores your previous clipboard content after pasting the transcription.")
+        cb = ctk.CTkCheckBox(card, text="Restore clipboard after paste",
+                             variable=self._restore_clip_var,
+                             font=ctk.CTkFont(size=13), fg_color=ACCENT, hover_color=ACCENT_HOVER)
+        cb.pack(anchor="w", padx=14, pady=(8, 4))
+        _Tooltip(cb, "Restores your previous clipboard content after pasting the transcription.")
 
         self._trailing_space_var = ctk.BooleanVar(value=self.settings.add_trailing_space)
-        ctk.CTkCheckBox(
-            card, text="Add trailing space",
-            variable=self._trailing_space_var,
-            font=ctk.CTkFont(size=13),
-            fg_color=ACCENT, hover_color=ACCENT_HOVER,
-        ).pack(anchor="w", padx=14, pady=(8, 2))
-        self._desc(card, "Adds a space after the transcription so you can keep typing naturally.")
+        cb = ctk.CTkCheckBox(card, text="Add trailing space",
+                             variable=self._trailing_space_var,
+                             font=ctk.CTkFont(size=13), fg_color=ACCENT, hover_color=ACCENT_HOVER)
+        cb.pack(anchor="w", padx=14, pady=(4, 12))
+        _Tooltip(cb, "Adds a space after the transcription so you can keep typing naturally.")
 
-        ctk.CTkFrame(card, height=6, fg_color="transparent").pack()
-
-        # ── LLM Normalization ────────────────────
+        # LLM Normalization card
         card = _make_card(scroll)
         card.pack(fill="x", pady=6, padx=4)
-        self._section_label(card, "LLM Normalization")
-
-        self._desc(card, "AI model used to fix grammar, punctuation, and formatting of transcribed text.")
+        self._section_label(card, "LLM Normalization",
+            tip="AI model that fixes grammar, punctuation, and formatting of transcribed text.")
 
         self._llm_provider_var = ctk.StringVar(value=self.settings.normalize_llm_provider)
         ctk.CTkSegmentedButton(
@@ -408,97 +449,82 @@ class SettingsWindow:
             variable=self._llm_provider_var,
             command=lambda _: self._on_llm_provider_change(),
             font=ctk.CTkFont(size=13),
-            selected_color=ACCENT,
-            selected_hover_color=ACCENT_HOVER,
-        ).pack(fill="x", padx=14, pady=(6, 8))
+            selected_color=ACCENT, selected_hover_color=ACCENT_HOVER,
+        ).pack(fill="x", padx=14, pady=(0, 8))
 
         # OpenAI LLM frame
         self._llm_openai_frame = ctk.CTkFrame(card, fg_color="transparent")
 
         row = self._row(self._llm_openai_frame)
-        ctk.CTkLabel(row, text="API Key", text_color=TEXT_DIM, width=60, anchor="w").pack(side="left")
+        lbl = self._lbl(row, "API Key", width=60)
+        _Tooltip(lbl, "Your OpenAI API key. Shared with Cloud STT if both are used.")
         self._llm_openai_key_var = ctk.StringVar(value=self.settings.openai_api_key)
-        ctk.CTkEntry(
-            row, textvariable=self._llm_openai_key_var, show="*",
-            fg_color=CARD_BG, border_color=BORDER, width=200,
-        ).pack(side="right")
-        self._desc(self._llm_openai_frame, "Your OpenAI API key. Shared with Cloud STT if both are used.", padx=14)
+        ctk.CTkEntry(row, textvariable=self._llm_openai_key_var, show="*",
+                     fg_color=INPUT_BG, border_color=BORDER, width=200).pack(side="right")
 
-        row = self._row(self._llm_openai_frame, pady=(3, 6))
-        ctk.CTkLabel(row, text="Model", text_color=TEXT_DIM, width=60, anchor="w").pack(side="left")
+        row = self._row(self._llm_openai_frame, pady=(3, 10))
+        lbl = self._lbl(row, "Model", width=60)
+        _Tooltip(lbl, "gpt-4o-mini: fast and cheap — recommended.\ngpt-4o: best quality, higher cost.")
         self._llm_model_var = ctk.StringVar(value=self.settings.normalize_llm_model)
         ctk.CTkOptionMenu(
             row, variable=self._llm_model_var,
             values=["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1-nano"],
-            fg_color=CARD_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER,
-            width=200,
+            fg_color=INPUT_BG, button_color=ACCENT, button_hover_color=ACCENT_HOVER, width=200,
         ).pack(side="right")
-        self._desc(self._llm_openai_frame, "gpt-4o-mini is fast and cheap. gpt-4o gives best quality.", padx=14)
 
         # Gemini LLM frame
         self._llm_gemini_frame = ctk.CTkFrame(card, fg_color="transparent")
 
         row = self._row(self._llm_gemini_frame)
-        ctk.CTkLabel(row, text="API Key", text_color=TEXT_DIM, width=60, anchor="w").pack(side="left")
+        lbl = self._lbl(row, "API Key", width=60)
+        _Tooltip(lbl, "Your Google Gemini API key from Google AI Studio (aistudio.google.com).")
         self._gemini_key_var = ctk.StringVar(value=self.settings.gemini_api_key)
-        ctk.CTkEntry(
-            row, textvariable=self._gemini_key_var, show="*",
-            fg_color=CARD_BG, border_color=BORDER, width=200,
-        ).pack(side="right")
-        self._desc(self._llm_gemini_frame, "Your Google Gemini API key from Google AI Studio.", padx=14)
+        ctk.CTkEntry(row, textvariable=self._gemini_key_var, show="*",
+                     fg_color=INPUT_BG, border_color=BORDER, width=200).pack(side="right")
 
-        ctk.CTkFrame(self._llm_gemini_frame, height=6, fg_color="transparent").pack()
+        ctk.CTkFrame(self._llm_gemini_frame, height=10, fg_color="transparent").pack()
 
         self._on_llm_provider_change()
 
     def _build_app_tab(self, tab):
         scroll = self._tab_scroll(tab)
 
-        # ── Startup ──────────────────────────────
+        # Startup card
         card = _make_card(scroll)
         card.pack(fill="x", pady=6, padx=4)
         self._section_label(card, "Startup")
 
         self._autostart_var = ctk.BooleanVar(value=self.settings.auto_start_with_windows)
-        ctk.CTkCheckBox(
-            card, text="Start with Windows",
-            variable=self._autostart_var,
-            font=ctk.CTkFont(size=13),
-            fg_color=ACCENT, hover_color=ACCENT_HOVER,
-        ).pack(anchor="w", padx=14, pady=(0, 2))
-        self._desc(card, "Automatically launch WhisperTyping when you log into Windows.")
+        cb = ctk.CTkCheckBox(card, text="Start with Windows",
+                             variable=self._autostart_var,
+                             font=ctk.CTkFont(size=13), fg_color=ACCENT, hover_color=ACCENT_HOVER)
+        cb.pack(anchor="w", padx=14, pady=(0, 12))
+        _Tooltip(cb, "Automatically launch WhisperTyping when you log into Windows.")
 
-        ctk.CTkFrame(card, height=8, fg_color="transparent").pack()
-
-        # ── Interface ────────────────────────────
+        # Interface card
         card = _make_card(scroll)
         card.pack(fill="x", pady=6, padx=4)
         self._section_label(card, "Interface")
 
         self._floating_var = ctk.BooleanVar(value=self.settings.show_floating_window)
-        ctk.CTkCheckBox(
-            card, text="Show floating status window",
-            variable=self._floating_var,
-            font=ctk.CTkFont(size=13),
-            fg_color=ACCENT, hover_color=ACCENT_HOVER,
-        ).pack(anchor="w", padx=14, pady=(0, 2))
-        self._desc(card, "Small overlay that shows recording/processing status on screen.")
+        cb = ctk.CTkCheckBox(card, text="Show floating status window",
+                             variable=self._floating_var,
+                             font=ctk.CTkFont(size=13), fg_color=ACCENT, hover_color=ACCENT_HOVER)
+        cb.pack(anchor="w", padx=14, pady=(0, 8))
+        _Tooltip(cb, "Small overlay that shows recording/processing status on screen.")
 
         self._always_on_top_var = ctk.BooleanVar(value=self.settings.always_on_top)
-        ctk.CTkCheckBox(
-            card, text="Always on top",
-            variable=self._always_on_top_var,
-            font=ctk.CTkFont(size=13),
-            fg_color=ACCENT, hover_color=ACCENT_HOVER,
-        ).pack(anchor="w", padx=14, pady=(10, 2))
-        self._desc(card, "Keep the floating window above all other windows.")
+        cb = ctk.CTkCheckBox(card, text="Always on top",
+                             variable=self._always_on_top_var,
+                             font=ctk.CTkFont(size=13), fg_color=ACCENT, hover_color=ACCENT_HOVER)
+        cb.pack(anchor="w", padx=14, pady=(0, 12))
+        _Tooltip(cb, "Keep the floating status window above all other windows.")
 
-        ctk.CTkFrame(card, height=8, fg_color="transparent").pack()
+    # ── UI helpers ────────────────────────────────────────────────────────────
 
-    # ── UI Helpers ────────────────────────────────────────────────────────────
-
-    def _tab_scroll(self, tab) -> ctk.CTkScrollableFrame:
-        """Create a scrollable frame that fills a tab."""
+    def _tab_scroll(self, tab):
+        """Wrap tab in a scrollable frame so long tabs can scroll."""
+        tab.configure(fg_color=CARD_BG)
         scroll = ctk.CTkScrollableFrame(
             tab, fg_color=CARD_BG,
             scrollbar_button_color=BORDER,
@@ -508,59 +534,61 @@ class SettingsWindow:
         return scroll
 
     def _row(self, parent, pady=(3, 3)) -> ctk.CTkFrame:
-        """Create a horizontal row frame."""
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.pack(fill="x", padx=14, pady=pady)
         return row
 
-    def _section_label(self, parent, text: str):
-        ctk.CTkLabel(
-            parent, text=text,
-            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
-            text_color=TEXT_BRIGHT,
-        ).pack(anchor="w", padx=14, pady=(10, 6))
+    def _lbl(self, parent, text: str, width: int = 90) -> ctk.CTkLabel:
+        """Create and pack a dim setting label. Returns widget for tooltip attachment."""
+        lbl = ctk.CTkLabel(parent, text=text, text_color=TEXT_DIM, width=width, anchor="w")
+        lbl.pack(side="left")
+        return lbl
 
-    def _desc(self, parent, text: str, padx: int = 14):
-        """Add a small description label."""
-        ctk.CTkLabel(
-            parent, text=text,
-            font=ctk.CTkFont(size=11),
-            text_color=TEXT_DIM,
-            anchor="w",
-            justify="left",
-            wraplength=440,
-        ).pack(anchor="w", padx=padx, pady=(0, 6))
+    def _section_label(self, parent, text: str, tip: str = ""):
+        """Section heading. ⓘ with hover tooltip when tip is given."""
+        display = f"{text}  ⓘ" if tip else text
+        lbl = ctk.CTkLabel(
+            parent, text=display,
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            text_color=TEXT_BRIGHT,
+        )
+        lbl.pack(anchor="w", padx=14, pady=(10, 6))
+        if tip:
+            _Tooltip(lbl, tip)
 
     def _make_hotkey_recorder(self, parent, hotkey_var: ctk.StringVar, start_fn):
-        """Create a hotkey row (label + display + record button). Returns (display_label, button)."""
         row = self._row(parent, pady=(3, 3))
-        ctk.CTkLabel(row, text="Hotkey", text_color=TEXT_DIM, width=60, anchor="w").pack(side="left")
-
+        self._lbl(row, "Hotkey", width=60)
         display = ctk.CTkLabel(
             row, text=hotkey_var.get(),
             font=ctk.CTkFont(size=14, weight="bold"),
             text_color=ACCENT, anchor="w",
         )
         display.pack(side="left", padx=(4, 10))
-
         btn = ctk.CTkButton(
-            row, text="Record", width=80, height=28,
-            font=ctk.CTkFont(size=12),
-            fg_color=ACCENT, hover_color=ACCENT_HOVER,
-            command=start_fn,
+            row, text="Record", width=80, height=28, font=ctk.CTkFont(size=12),
+            fg_color=ACCENT, hover_color=ACCENT_HOVER, command=start_fn,
         )
         btn.pack(side="right")
         return display, btn
 
-    # ── Provider / trigger visibility ─────────────────────────────────────────
+    # ── Visibility toggles ────────────────────────────────────────────────────
+
+    def _on_device_change(self):
+        device  = self._device_var.get()
+        current = self._compute_var.get()
+        if device == "cpu"  and current == "float16":
+            self._compute_var.set("int8")
+        elif device == "cuda" and current == "int8":
+            self._compute_var.set("float16")
 
     def _on_provider_change(self):
         if self._provider_var.get() == "local":
             self._cloud_frame.pack_forget()
-            self._local_frame.pack(fill="x", after=self._local_frame.master.winfo_children()[2])
+            self._local_frame.pack(fill="x")
         else:
             self._local_frame.pack_forget()
-            self._cloud_frame.pack(fill="x", after=self._cloud_frame.master.winfo_children()[2])
+            self._cloud_frame.pack(fill="x")
 
     def _on_trigger_type_change(self):
         if self._trigger_type_var.get() == TRIGGER_TYPE_KEYBOARD:
@@ -608,17 +636,15 @@ class SettingsWindow:
                 parts.append(name)
             if not parts:
                 return
-
             combo = "+".join(parts)
             keyboard.unhook(hook)
             self._hotkey_recording = False
             self._hotkey_var.set(combo)
-
-            def _update_ui():
+            def _update():
                 self._hotkey_display.configure(text=combo, text_color=ACCENT)
                 self._hotkey_btn.configure(text="Record", fg_color=ACCENT)
             if self._window and self._window.winfo_exists():
-                self._window.after(0, _update_ui)
+                self._window.after(0, _update)
 
         hook = keyboard.hook(_on_key)
 
@@ -642,74 +668,63 @@ class SettingsWindow:
                 parts.append(name)
             if not parts:
                 return
-
             combo = "+".join(parts)
             keyboard.unhook(hook)
             self._norm_hotkey_recording = False
             self._norm_hotkey_var.set(combo)
-
-            def _update_ui():
+            def _update():
                 self._norm_hotkey_display.configure(text=combo, text_color=ACCENT)
                 self._norm_hotkey_btn.configure(text="Record", fg_color=ACCENT)
             if self._window and self._window.winfo_exists():
-                self._window.after(0, _update_ui)
+                self._window.after(0, _update)
 
         hook = keyboard.hook(_on_key)
 
     # ── Save / Cancel ─────────────────────────────────────────────────────────
 
     def _save(self):
-        # Speech recognition
-        self.settings.stt_provider = self._provider_var.get()
-        self.settings.local_model_size = self._model_size_var.get()
-        self.settings.device = self._device_var.get()
-        self.settings.compute_type = self._compute_var.get()
-        self.settings.openai_api_key = self._api_key_var.get()
-        self.settings.openai_model = self._cloud_model_var.get()
-        self.settings.language = self._lang_var.get()
-        self.settings.microphone_device_index = self._device_map.get(
-            self._mic_var.get(), -1
-        )
+        self.settings.stt_provider        = self._provider_var.get()
+        self.settings.local_model_size    = self._model_size_var.get()
+        self.settings.device              = self._device_var.get()
+        self.settings.compute_type        = self._compute_var.get()
+        self.settings.openai_api_key      = self._api_key_var.get()
+        self.settings.openai_model        = self._cloud_model_var.get()
+        self.settings.language            = self._lang_var.get()
+        self.settings.microphone_device_index = self._device_map.get(self._mic_var.get(), -1)
 
-        # Raw trigger
-        self.settings.trigger_type = self._trigger_type_var.get()
-        self.settings.trigger_key = self._hotkey_var.get()
+        self.settings.trigger_type         = self._trigger_type_var.get()
+        self.settings.trigger_key          = self._hotkey_var.get()
         self.settings.trigger_mouse_button = self._mouse_btn_var.get()
-        self.settings.trigger_mode = self._mode_var.get()
+        self.settings.trigger_mode         = self._mode_var.get()
 
-        # Text injection
-        self.settings.injection_method = self._injection_var.get()
-        self.settings.restore_clipboard = self._restore_clip_var.get()
-        self.settings.add_trailing_space = self._trailing_space_var.get()
+        self.settings.injection_method    = self._injection_var.get()
+        self.settings.restore_clipboard   = self._restore_clip_var.get()
+        self.settings.add_trailing_space  = self._trailing_space_var.get()
 
-        # Normalize trigger + LLM
-        self.settings.normalize_trigger_enabled = self._norm_enabled_var.get()
-        self.settings.normalize_trigger_type = self._norm_trigger_type_var.get()
-        self.settings.normalize_trigger_key = self._norm_hotkey_var.get()
+        self.settings.normalize_trigger_enabled      = self._norm_enabled_var.get()
+        self.settings.normalize_trigger_type         = self._norm_trigger_type_var.get()
+        self.settings.normalize_trigger_key          = self._norm_hotkey_var.get()
         self.settings.normalize_trigger_mouse_button = self._norm_mouse_btn_var.get()
-        self.settings.normalize_trigger_mode = self._norm_mode_var.get()
-        self.settings.normalize_llm_provider = self._llm_provider_var.get()
-        self.settings.normalize_llm_model = self._llm_model_var.get()
-        self.settings.gemini_api_key = self._gemini_key_var.get()
+        self.settings.normalize_trigger_mode         = self._norm_mode_var.get()
+        self.settings.normalize_llm_provider         = self._llm_provider_var.get()
+        self.settings.normalize_llm_model            = self._llm_model_var.get()
+        self.settings.gemini_api_key                 = self._gemini_key_var.get()
 
-        # Sync OpenAI API key — LLM field takes priority, fall back to Cloud STT field
-        llm_key = self._llm_openai_key_var.get()
+        # Sync OpenAI key — LLM field takes priority
+        llm_key   = self._llm_openai_key_var.get()
         cloud_key = self._api_key_var.get()
         if llm_key:
             self.settings.openai_api_key = llm_key
         elif cloud_key:
             self.settings.openai_api_key = cloud_key
 
-        # Application
         self.settings.auto_start_with_windows = self._autostart_var.get()
-        self.settings.show_floating_window = self._floating_var.get()
-        self.settings.always_on_top = self._always_on_top_var.get()
+        self.settings.show_floating_window    = self._floating_var.get()
+        self.settings.always_on_top           = self._always_on_top_var.get()
 
         self.settings.save()
-
         if self.on_save:
             self.on_save(self.settings)
-
         self._window.destroy()
         self._window = None
         logger.info("Settings saved")
@@ -720,7 +735,7 @@ class SettingsWindow:
                 keyboard.unhook_all()
             except Exception:
                 pass
-            self._hotkey_recording = False
+            self._hotkey_recording      = False
             self._norm_hotkey_recording = False
         if self._window:
             self._window.destroy()

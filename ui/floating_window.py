@@ -66,7 +66,7 @@ class FloatingWindow:
 
         self._root = ctk.CTk()
         self._root.title("WhisperTyping")
-        self._root.geometry("300x80")
+        self._root.geometry("300x95")
         self._root.resizable(False, False)
         self._root.overrideredirect(True)
         self._root.wm_attributes("-topmost", self.always_on_top)
@@ -115,6 +115,15 @@ class FloatingWindow:
             font=ctk.CTkFont(size=13), anchor="w",
         )
         self._status_label.pack(side="left", fill="x", expand=True, padx=(5, 0))
+
+        # Middle row: device/model info
+        self._device_label = ctk.CTkLabel(
+            frame, text="",
+            font=ctk.CTkFont(size=10),
+            text_color="#666688",
+            anchor="w",
+        )
+        self._device_label.pack(fill="x", padx=14, pady=(0, 2))
 
         # Bottom row: level meter + settings button
         bottom_frame = ctk.CTkFrame(frame, fg_color="transparent")
@@ -283,6 +292,22 @@ class FloatingWindow:
                 # Auto-hide errors after longer delay
                 self._schedule_auto_hide(ERROR_HIDE_DELAY_MS)
 
+        if self._root:
+            self._root.after(0, _update)
+
+    def set_device_info(self, device: str, model: str, provider: str = "local"):
+        """Update the device/model info line."""
+        def _update():
+            if not self._device_label:
+                return
+            if provider != "local":
+                text = f"cloud · OpenAI"
+                color = "#8888cc"
+            else:
+                icon = "⚡" if device == "cuda" else "🖥"
+                color = "#55aaff" if device == "cuda" else "#aaaaaa"
+                text = f"{icon} {device} · {model}"
+            self._device_label.configure(text=text, text_color=color)
         if self._root:
             self._root.after(0, _update)
 
